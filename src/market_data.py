@@ -18,7 +18,6 @@ def fetch_ticker_data(ticker):
     """
     Download historical daily OHLC data for a single ticker.
 
-
     Args:
         ticker: ticker symbol, e.g. "NVDA".
 
@@ -33,25 +32,25 @@ def fetch_ticker_data(ticker):
     return ticker_history
 
 
-def save_ticker_data(df, ticker):
+def save_ticker_data(data_frame, ticker):
     """
     Persist a ticker's DataFrame to data/<ticker>.csv.
 
     Args:
-        df: DataFrame returned by fetch_ticker_data.
+        data_frame: DataFrame returned by fetch_ticker_data.
         ticker: ticker symbol, used to build the output filename.
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    df.to_csv(DATA_DIR / f"{ticker}.csv", index=True)
+    data_frame.to_csv(DATA_DIR / f"{ticker}.csv", index=True)
 
 
 def main():
     for ticker in TICKERS:
-        df = fetch_ticker_data(ticker)
-        if df is not None:
-            save_ticker_data(df, ticker)
-            print(f"{len(df)} rows of data saved for {ticker}.")
+        data_frame = fetch_ticker_data(ticker)
+        if data_frame is not None:
+            save_ticker_data(data_frame, ticker)
+            print(f"{len(data_frame)} rows of data saved for {ticker}.")
 
 
 if __name__ == "__main__":
