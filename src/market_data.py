@@ -25,6 +25,7 @@ def fetch_ticker_data(ticker):
         A pandas DataFrame with OHLC columns, indexed/sorted by date.
     """
     ticker_history = yf.Ticker(ticker).history(period=PERIOD)
+    ticker_history = ticker_history.dropna(subset=["Open", "High", "Low", "Close"])
     if ticker_history.empty:
         print(f"Warning: No data found for {ticker}.")
         return None
