@@ -4,7 +4,7 @@ import yfinance as yf
 from pathlib import Path
 
 # Tickers in scope for v1 (see CLAUDE.md)
-TICKERS = ["NVDA", "META", "MSFT", "AAPL", "TSM"]
+TICKERS = ["NVDA", "META", "MSFT", "TSM", "IREN", "NBIS"]
 
 # Where each ticker's CSV will be written (data/<TICKER>.csv)
 DATA_DIR = Path("data")

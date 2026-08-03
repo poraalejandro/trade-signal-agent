@@ -17,7 +17,7 @@ This applies to every file in this project, not just the first one. If I explici
 
 Tickers (v1 scope)
 
-NVDA, META, MSFT, AAPL, TSM
+NVDA, META, MSFT, TSM, IREN, NBIS
 
 Stack decisions (already made — don't relitigate these)
 Python, no heavy trading/backtesting frameworks. Indicators are hand-rolled (no pandas-ta), specifically so I understand each formula, not just call a library.
