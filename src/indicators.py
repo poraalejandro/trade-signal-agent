@@ -89,3 +89,50 @@ def macd(prices, fast_period=12, slow_period=26, signal_period=9):
     return pd.DataFrame(
         {"MACD": macd_line, "Signal": signal_line, "Histogram": macd_line - signal_line}
     )
+
+
+def moving_average_crossover(prices, short_period=25, mid_period=50, long_period=200):
+    """
+    Classify trend alignment across a short/mid/long EMA triple.
+
+    Args:
+        prices: pandas Series of closing prices, indexed by date.
+        short_period: period for the short EMA (default 25).
+        mid_period: period for the mid EMA (default 50).
+        long_period: period for the long EMA (default 200).
+
+    Returns:
+        A pandas DataFrame with columns 'EMA_short', 'EMA_mid', 'EMA_long',
+        'Trend' ('bullish'/'bearish'/'mixed'), and 'CrossEvent'
+        ('golden_cross'/'death_cross'/'none' on the mid/long pair).
+    """
+    ema_short = ema(prices, span=short_period)
+    ema_mid = ema(prices, span=mid_period)
+    ema_long = ema(prices, span=long_period)
+
+    bullish_mask = (ema_short > ema_mid) & (ema_mid > ema_long)
+    bearish_mask = (ema_short < ema_mid) & (ema_mid < ema_long)
+
+    trend = pd.Series("mixed", index=prices.index)
+    trend[bullish_mask] = "bullish"
+    trend[bearish_mask] = "bearish"
+
+    mid_above_long_today = ema_mid > ema_long
+    mid_above_long_yesterday = mid_above_long_today.shift(1, fill_value=False)
+
+    golden_cross = mid_above_long_today & ~mid_above_long_yesterday
+    death_cross = ~mid_above_long_today & mid_above_long_yesterday
+
+    cross_event = pd.Series("none", index=prices.index)
+    cross_event[golden_cross] = "golden_cross"
+    cross_event[death_cross] = "death_cross"
+
+    return pd.DataFrame(
+        {
+            "EMA_short": ema_short,
+            "EMA_mid": ema_mid,
+            "EMA_long": ema_long,
+            "Trend": trend,
+            "CrossEvent": cross_event,
+        }
+    )
