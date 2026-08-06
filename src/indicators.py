@@ -103,8 +103,8 @@ def moving_average_crossover(prices, short_period=25, mid_period=50, long_period
 
     Returns:
         A pandas DataFrame with columns 'EMA_short', 'EMA_mid', 'EMA_long',
-        'Trend' ('bullish'/'bearish'/'mixed'), and 'CrossEvent'
-        ('golden_cross'/'death_cross'/'none' on the mid/long pair).
+        'Trend' ('Bullish'/'Bearish'/'Mixed'), and 'CrossEvent'
+        ('Golden Cross'/'Death Cross'/'None' on the mid/long pair).
     """
     ema_short = ema(prices, span=short_period)
     ema_mid = ema(prices, span=mid_period)
@@ -113,9 +113,9 @@ def moving_average_crossover(prices, short_period=25, mid_period=50, long_period
     bullish_mask = (ema_short > ema_mid) & (ema_mid > ema_long)
     bearish_mask = (ema_short < ema_mid) & (ema_mid < ema_long)
 
-    trend = pd.Series("mixed", index=prices.index)
-    trend[bullish_mask] = "bullish"
-    trend[bearish_mask] = "bearish"
+    trend = pd.Series("Mixed", index=prices.index)
+    trend[bullish_mask] = "Bullish"
+    trend[bearish_mask] = "Bearish"
 
     mid_above_long_today = ema_mid > ema_long
     mid_above_long_yesterday = mid_above_long_today.shift(1, fill_value=False)
@@ -123,9 +123,9 @@ def moving_average_crossover(prices, short_period=25, mid_period=50, long_period
     golden_cross = mid_above_long_today & ~mid_above_long_yesterday
     death_cross = ~mid_above_long_today & mid_above_long_yesterday
 
-    cross_event = pd.Series("none", index=prices.index)
-    cross_event[golden_cross] = "golden_cross"
-    cross_event[death_cross] = "death_cross"
+    cross_event = pd.Series("None", index=prices.index)
+    cross_event[golden_cross] = "Golden Cross"
+    cross_event[death_cross] = "Death Cross"
 
     return pd.DataFrame(
         {
@@ -134,5 +134,72 @@ def moving_average_crossover(prices, short_period=25, mid_period=50, long_period
             "EMA_long": ema_long,
             "Trend": trend,
             "CrossEvent": cross_event,
+        }
+    )
+
+
+def bollinger_bands(prices, period=20, num_std=2):
+    """
+    Compute Bollinger Bands over a closing-price series.
+
+    Args:
+        prices: pandas Series of closing prices, indexed by date.
+        period: lookback window for the SMA and standard deviation (default 20).
+        num_std: number of standard deviations for the upper/lower bands (default 2).
+
+    Returns:
+        A pandas DataFrame with columns 'Middle' (SMA), 'Upper', 'Lower', and
+        'Signal' ('Overbought'/'Oversold'/'Neutral' based on price vs. the bands).
+    """
+    sma = prices.rolling(window=period).mean()
+    standard_deviation = prices.rolling(window=period).std()
+    upper_end = sma + (num_std * standard_deviation)
+    lower_end = sma - (num_std * standard_deviation)
+
+    overbought_mask = prices > upper_end
+    oversold_mask = prices < lower_end
+    trend = pd.Series("Neutral", index=prices.index)
+    trend[overbought_mask] = "Overbought"
+    trend[oversold_mask] = "Oversold"
+
+    return pd.DataFrame(
+        {
+            "Middle": sma,
+            "Upper": upper_end,
+            "Lower": lower_end,
+            "Signal": trend,
+        }
+    )
+
+
+def volume_anomaly(volume, period=20, threshold=2):
+    """
+    Detect abnormally high trading volume relative to its recent average.
+
+    Args:
+        volume: pandas Series of daily trading volume, indexed by date.
+        period: lookback window for the average volume (default 20).
+        threshold: ratio of today's volume to the average above which a day
+            is flagged as anomalous (default 2, i.e. double the average).
+
+    Returns:
+        A pandas DataFrame with columns 'AvgVolume', 'Ratio', and 'Signal'
+        ('High Volume'/'Normal'). AvgVolume excludes the current day itself
+        (computed over the preceding `period` days) to avoid a spike
+        inflating its own baseline.
+    """
+    avg_volume = volume.shift(1).rolling(window=period).mean()
+    ratio = volume / avg_volume
+
+    high_volume_mask = ratio > threshold
+
+    volume_signal = pd.Series("Normal", index=volume.index)
+    volume_signal[high_volume_mask] = "High Volume"
+
+    return pd.DataFrame(
+        {
+            "AvgVolume": avg_volume,
+            "Ratio": ratio,
+            "Signal": volume_signal,
         }
     )
