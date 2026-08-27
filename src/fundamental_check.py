@@ -62,15 +62,15 @@ def get_recent_filings(cik):
     return list(zip(forms, dates))
 
 
-def check_recent_filings(ticker):
+def check_recent_filings(ticker: str) -> dict:
     """
     Check how many days have passed since a ticker's most recent
-    earnings-related filing (EARNINGS_FORM_TYPES) and most recent annual
-    filing (ANNUAL_FORM_TYPES) — covers both domestic and foreign private
-    issuer form types (e.g. 6-K/20-F for tickers like TSM, NBIS).
+    earnings-related filing (8-K/10-Q, or 6-K for foreign private issuers)
+    and most recent annual report (10-K, or 20-F for foreign private
+    issuers), to check for recent fundamental events like earnings releases.
 
     Args:
-        ticker: ticker symbol, e.g. "NVDA".
+        ticker: Stock ticker symbol, e.g. "NVDA".
 
     Returns:
         A dict with 'days_since_earnings' and 'days_since_annual' (each an

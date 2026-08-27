@@ -78,7 +78,7 @@ def macd(prices, fast_period=12, slow_period=26, signal_period=9):
         signal_period: period for the signal line EMA (default 9).
 
     Returns:
-        A pandas DataFrame with columns 'MACD', 'Signal' and 'Histogram', indexed by date.
+        A pandas DataFrame with columns 'MACD', 'Signal Line' and 'Histogram', indexed by date.
     """
     ema_fast = ema(prices, span=fast_period)
     ema_slow = ema(prices, span=slow_period)
@@ -87,7 +87,11 @@ def macd(prices, fast_period=12, slow_period=26, signal_period=9):
     signal_line = ema(macd_line, span=signal_period)
 
     return pd.DataFrame(
-        {"MACD": macd_line, "Signal": signal_line, "Histogram": macd_line - signal_line}
+        {
+            "MACD": macd_line,
+            "Signal Line": signal_line,
+            "Histogram": macd_line - signal_line,
+        }
     )
 
 
