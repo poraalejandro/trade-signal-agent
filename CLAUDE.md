@@ -22,7 +22,7 @@ NVDA, META, MSFT, TSM, IREN, NBIS
 Stack decisions (already made — don't relitigate these)
 Python, no heavy trading/backtesting frameworks. Indicators are hand-rolled (no pandas-ta), specifically so I understand each formula, not just call a library.
 yfinance for historical OHLC price data (free, no API key needed).
-Gemini API (gemini-2.5-flash, same as project #1) for the confluence reasoning step and for generating the explanation attached to each flagged signal.
+Groq API (qwen/qwen3.8-27b) for the confluence reasoning step and for generating the explanation attached to each flagged signal. Switched from Gemini (used in project #1) because Gemini's free tier caps at 20 requests/day, too tight for a 6-ticker x 6-tool agent; Groq's free tier has no such daily cap. Tool calling is done manually (Groq's API doesn't have Gemini's automatic function-calling convenience).
 SEC EDGAR fundamental-check logic is reused/adapted from the rag-finance project (same source, different purpose: checking for recent/upcoming filings, not Q&A).
 Output interface: a Streamlit app, consistent with project #1.
 Build order (don't skip ahead)
@@ -34,5 +34,5 @@ src/backtest.py — run the confluence logic (simplified — don't call the LLM 
 app.py — Streamlit UI wrapping the above.
 Hard rules
 Never output or imply a direct trade execution instruction. Flag candidates with reasoning only — the human reviews and decides.
-.env, .venv/, __pycache__/, and any credentials go in .gitignore from the very first commit — this project holds a Gemini API key like project #1 did.
+.env, .venv/, __pycache__/, and any credentials go in .gitignore from the very first commit — this project holds a Groq API key.
 Commit in small, descriptive steps per module (matches the build order above), not one giant commit at the end — the git history is part of what a recruiter reviews.
