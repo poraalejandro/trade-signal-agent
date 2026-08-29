@@ -1,11 +1,11 @@
 """Core agent: calls indicator/fundamental tools per ticker and reasons over confluence."""
 
+import json
 import os
 from typing import Literal
 
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from groq import Groq
 from pydantic import BaseModel
 
 from fundamental_check import check_recent_filings
@@ -20,13 +20,13 @@ from indicators import (
 from market_data import TICKERS
 
 load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
+api_key = os.getenv("GROQ_API_KEY")
 if not api_key:
-    raise EnvironmentError("GEMINI_API_KEY not set in .env file")
+    raise EnvironmentError("GROQ_API_KEY not set in .env file")
 
-client = genai.Client(api_key=api_key)
+client = Groq(api_key=api_key, max_retries=6)
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "qwen/qwen3.8-27b"
 
 SYSTEM_INSTRUCTIONS = """
 You are a trading-signal screening assistant. Your job is to analyze a single
@@ -65,12 +65,17 @@ confluence (or lack of it), and which specific signals support your
 conclusion.
 """
 
+
 class TradeSignal(BaseModel):
     ticker: str
     flagged: bool
     direction: Literal["call", "put"] | None = None
     reasoning: str
     supporting_signals: list[str]
+
+
+class TradeSignalList(BaseModel):
+    signals: list[TradeSignal]
 
 
 def get_rsi_signal(ticker: str) -> dict:
@@ -175,14 +180,105 @@ def get_volume_anomaly(ticker: str) -> dict:
     return volume_anomaly(load_price_data(ticker)["Volume"]).round(2).iloc[-1].to_dict()
 
 
+TOOL_FUNCTIONS = {
+    "get_rsi_signal": get_rsi_signal,
+    "get_macd_signal": get_macd_signal,
+    "get_crossover_signal": get_crossover_signal,
+    "get_bollinger_bands": get_bollinger_bands,
+    "get_volume_anomaly": get_volume_anomaly,
+    "check_recent_filings": check_recent_filings,
+}
+
+
+def build_tool_schema(name: str, description: str) -> dict:
+    """
+    Build a Groq/OpenAI-style function-calling schema for one of our tools.
+    Every tool here takes the same single argument, so this one helper
+    covers all 6 instead of writing out 6 near-identical schemas by hand.
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": 'Stock ticker symbol, e.g. "NVDA".',
+                    }
+                },
+                "required": ["ticker"],
+            },
+        },
+    }
+
+
 TOOLS = [
-    get_rsi_signal,
-    get_macd_signal,
-    get_crossover_signal,
-    get_bollinger_bands,
-    get_volume_anomaly,
-    check_recent_filings,
+    build_tool_schema(
+        "get_rsi_signal",
+        "Get the current RSI for a ticker, to check for overbought/oversold "
+        "momentum conditions.",
+    ),
+    build_tool_schema(
+        "get_macd_signal",
+        "Get the current MACD for a ticker, to check for bullish/bearish "
+        "momentum shifts.",
+    ),
+    build_tool_schema(
+        "get_crossover_signal",
+        "Get the current EMA trend alignment (25/50/200) for a ticker, "
+        "recent golden/death cross events, and whether one appears to be "
+        "approaching.",
+    ),
+    build_tool_schema(
+        "get_bollinger_bands",
+        "Get the current Bollinger Bands for a ticker, to check if price is "
+        "trading outside its normal volatility range.",
+    ),
+    build_tool_schema(
+        "get_volume_anomaly",
+        "Get today's trading volume for a ticker relative to its recent "
+        "average, to check for unusually high activity.",
+    ),
+    build_tool_schema(
+        "check_recent_filings",
+        "Check days since a ticker's most recent earnings-related SEC "
+        "filing and most recent annual report.",
+    ),
 ]
+
+
+def run_conversation_with_tools(messages: list[dict]) -> list[dict]:
+    """
+    Manual tool-calling loop: ask the model, execute any tool calls it
+    requests, feed the results back, and repeat until it stops requesting
+    tools. Returns the full message history including the final reply.
+    """
+    while True:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=messages,
+            tools=TOOLS,
+        )
+        message = response.choices[0].message
+        messages.append(message.model_dump(exclude_none=True))
+
+        if not message.tool_calls:
+            return messages
+
+        for tool_call in message.tool_calls:
+            function = TOOL_FUNCTIONS[tool_call.function.name]
+            arguments = json.loads(tool_call.function.arguments)
+            result = function(**arguments)
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(result),
+                }
+            )
 
 
 def analyze_ticker(ticker: str) -> TradeSignal:
@@ -191,31 +287,86 @@ def analyze_ticker(ticker: str) -> TradeSignal:
     available tools freely, then asks it to commit to a structured
     decision (flag or stay silent) based on what it found.
     """
-    gather_response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=f"Analyze {ticker}.",
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTIONS,
-            tools=TOOLS,
-        ),
-    )
-
-    # automatic_function_calling_history holds the tool-call turns, but not
-    # the model's final synthesized text — append that turn explicitly so
-    # the structured-output call has the full context.
-    history = gather_response.automatic_function_calling_history + [
-        gather_response.candidates[0].content
+    messages = [
+        {"role": "system", "content": SYSTEM_INSTRUCTIONS},
+        {"role": "user", "content": f"Analyze {ticker}."},
     ]
-    history.append("Now respond with your final decision in the required structured format.")
-
-    decision_response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=history,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTIONS,
-            response_mime_type="application/json",
-            response_schema=TradeSignal,
-        ),
+    messages = run_conversation_with_tools(messages)
+    messages.append(
+        {
+            "role": "user",
+            "content": "Now respond with your final decision in the required structured format.",
+        }
     )
 
-    return decision_response.parsed
+    decision = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=messages,
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "TradeSignal",
+                "schema": TradeSignal.model_json_schema(),
+            },
+        },
+    )
+
+    signal = TradeSignal.model_validate_json(decision.choices[0].message.content)
+
+    # The model doesn't always respect "direction only if flagged" — enforce
+    # it in code rather than trusting the prompt alone.
+    if not signal.flagged:
+        signal.direction = None
+
+    return signal
+
+
+def analyze_all_tickers(tickers: list[str] = TICKERS) -> list[TradeSignal]:
+    """
+    Analyze multiple tickers in a single conversation, instead of calling
+    analyze_ticker once per ticker, to conserve API requests.
+    """
+    ticker_list = ", ".join(tickers)
+    messages = [
+        {"role": "system", "content": SYSTEM_INSTRUCTIONS},
+        {
+            "role": "user",
+            "content": (
+                f"Analyze each of these tickers, one at a time: {ticker_list}. "
+                "Call the tools as needed for each ticker before moving to the next."
+            ),
+        },
+    ]
+    messages = run_conversation_with_tools(messages)
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                "Now respond with your final decision for EVERY ticker you were "
+                "asked to analyze, one entry per ticker, in the required "
+                "structured format."
+            ),
+        }
+    )
+
+    decision = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=messages,
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "TradeSignalList",
+                "schema": TradeSignalList.model_json_schema(),
+            },
+        },
+    )
+
+    signals = TradeSignalList.model_validate_json(
+        decision.choices[0].message.content
+    ).signals
+
+    for signal in signals:
+        if not signal.flagged:
+            signal.direction = None
+
+    return signals
