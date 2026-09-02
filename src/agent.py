@@ -87,9 +87,9 @@ def get_rsi_signal(ticker: str) -> dict:
         ticker: Stock ticker symbol, e.g. "NVDA".
     """
     rsi_results = rsi(load_price_data(ticker)["Close"]).iloc[-1]
-    if rsi_results > 70:
+    if rsi_results > 65:
         rsi_status = "Overbought"
-    elif rsi_results < 30:
+    elif rsi_results < 35:
         rsi_status = "Oversold"
     else:
         rsi_status = "Neutral"
