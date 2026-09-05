@@ -6,11 +6,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 import altair as alt
+import groq
 import pandas as pd
 import streamlit as st
 
 import market_data
 from agent import (
+    analyze_all_tickers,
     analyze_ticker,
     get_bollinger_bands,
     get_crossover_signal,
@@ -80,6 +82,19 @@ ensure_data_downloaded()
 @st.cache_data
 def cached_analyze_ticker(ticker: str, data_version: float):
     return analyze_ticker(ticker)
+
+
+@st.cache_data
+def cached_analyze_all_tickers(data_version: float):
+    return analyze_all_tickers(TICKERS)
+
+
+def render_rate_limit_notice():
+    st.error(
+        "Groq's free tier has a small output-tokens-per-minute budget for "
+        "this model, and it's shared across every analysis. Wait under a "
+        "minute and try again."
+    )
 
 
 @st.cache_data
@@ -302,16 +317,23 @@ with analyze_all_col:
 
 if analyze_one and selected_ticker:
     with st.spinner(f"Analyzing {selected_ticker}..."):
-        signal = cached_analyze_ticker(selected_ticker, data_file_mtime(selected_ticker))
-    render_signal(signal)
+        try:
+            signal = cached_analyze_ticker(selected_ticker, data_file_mtime(selected_ticker))
+        except groq.RateLimitError:
+            render_rate_limit_notice()
+        else:
+            render_signal(signal)
 
 if analyze_all:
-    with st.status("Analyzing all tickers...", expanded=True) as status:
-        for ticker in TICKERS:
-            st.write(f"Analyzing {ticker}...")
-            signal = cached_analyze_ticker(ticker, data_file_mtime(ticker))
-            render_signal(signal)
-        status.update(label="Done", state="complete")
+    with st.status("Analyzing all 6 tickers in one pass...", expanded=True) as status:
+        try:
+            signals = cached_analyze_all_tickers(max(data_file_mtime(t) for t in TICKERS))
+        except groq.RateLimitError:
+            render_rate_limit_notice()
+        else:
+            for signal in signals:
+                render_signal(signal)
+            status.update(label="Done", state="complete")
 
 st.divider()
 
