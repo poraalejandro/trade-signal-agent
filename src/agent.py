@@ -2,12 +2,14 @@
 
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
 from dotenv import load_dotenv
 from groq import Groq
 from pydantic import BaseModel
 
+from confluence import CONFLUENCE_THRESHOLD, classify_macd, classify_rsi
 from fundamental_check import check_recent_filings
 from indicators import (
     bollinger_bands,
@@ -28,7 +30,7 @@ client = Groq(api_key=api_key, max_retries=6)
 
 MODEL_NAME = "qwen/qwen3.8-27b"
 
-SYSTEM_INSTRUCTIONS = """
+SYSTEM_INSTRUCTIONS = f"""
 You are a trading-signal screening assistant. Your job is to analyze a single
 stock ticker by combining technical indicator confluence with a fundamental
 filings check, and decide whether it's worth flagging as a candidate for a
@@ -43,14 +45,16 @@ For the given ticker:
    information support, contradict, or add relevant context to that
    technical picture?
 3. Decide whether to flag:
-   - Confluence means at least 3 of the 4 directional indicators (RSI,
-     MACD, EMA Trend, Bollinger Bands) agree on the same direction
-     (Bullish/Oversold => bullish case; Bearish/Overbought => bearish
-     case). Neutral/Mixed readings do not count toward either side.
+   - Confluence means at least {CONFLUENCE_THRESHOLD} of the 4 directional
+     indicators (RSI, MACD, EMA Trend, Bollinger Bands) agree on the same
+     direction (Bullish/Oversold => bullish case; Bearish/Overbought =>
+     bearish case). Neutral/Mixed readings do not count toward either side.
    - Volume anomaly and the fundamental filings check are context, not
      votes: use them to strengthen or add caution to your reasoning, but
-     the 3-of-4 majority is the flagging threshold, not a strict veto.
-   - If fewer than 3 of the 4 agree, do NOT flag — silence is valid.
+     the {CONFLUENCE_THRESHOLD}-of-4 majority is the flagging threshold,
+     not a strict veto.
+   - If fewer than {CONFLUENCE_THRESHOLD} of the 4 agree, do NOT flag —
+     silence is valid.
 
 Hard rules:
 - NEVER state or imply a direct trade execution instruction (e.g. "buy",
@@ -87,12 +91,7 @@ def get_rsi_signal(ticker: str) -> dict:
         ticker: Stock ticker symbol, e.g. "NVDA".
     """
     rsi_results = rsi(load_price_data(ticker)["Close"]).iloc[-1]
-    if rsi_results > 65:
-        rsi_status = "Overbought"
-    elif rsi_results < 35:
-        rsi_status = "Oversold"
-    else:
-        rsi_status = "Neutral"
+    rsi_status = classify_rsi(rsi_results)
 
     return {"RSI": round(rsi_results, 2), "Signal": rsi_status}
 
@@ -107,10 +106,7 @@ def get_macd_signal(ticker: str) -> dict:
     """
     macd_results = macd(load_price_data(ticker)["Close"]).iloc[-1].round(2)
 
-    if macd_results["MACD"] > macd_results["Signal Line"]:
-        macd_signal = "Bullish"
-    else:
-        macd_signal = "Bearish"
+    macd_signal = classify_macd(macd_results["MACD"], macd_results["Signal Line"])
 
     result = macd_results.to_dict()
     result["Signal"] = macd_signal
@@ -250,11 +246,35 @@ TOOLS = [
 ]
 
 
+def _execute_tool_call(tool_call):
+    """
+    Run one tool call and build its message-list entry. Exceptions are
+    caught here and reported back to the model as that tool's own result,
+    instead of propagating and aborting the whole turn — a failure in one
+    tool (a bad ticker, a network timeout) shouldn't block the others that
+    ran fine alongside it.
+    """
+    function = TOOL_FUNCTIONS[tool_call.function.name]
+    arguments = json.loads(tool_call.function.arguments)
+
+    try:
+        content = json.dumps(function(**arguments))
+    except Exception as error:
+        content = json.dumps({"error": str(error)})
+
+    return {"role": "tool", "tool_call_id": tool_call.id, "content": content}
+
+
 def run_conversation_with_tools(messages: list[dict]) -> list[dict]:
     """
     Manual tool-calling loop: ask the model, execute any tool calls it
     requests, feed the results back, and repeat until it stops requesting
     tools. Returns the full message history including the final reply.
+
+    Tool calls within one turn are independent of each other (none needs
+    another's result), so they run concurrently via a thread pool rather
+    than one at a time — each does file/network I/O, not CPU-bound work,
+    so threads (not processes) are the right tool here.
     """
     while True:
         response = client.chat.completions.create(
@@ -268,17 +288,37 @@ def run_conversation_with_tools(messages: list[dict]) -> list[dict]:
         if not message.tool_calls:
             return messages
 
-        for tool_call in message.tool_calls:
-            function = TOOL_FUNCTIONS[tool_call.function.name]
-            arguments = json.loads(tool_call.function.arguments)
-            result = function(**arguments)
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": json.dumps(result),
-                }
-            )
+        with ThreadPoolExecutor(max_workers=len(message.tool_calls)) as executor:
+            tool_messages = list(executor.map(_execute_tool_call, message.tool_calls))
+        messages.extend(tool_messages)
+
+
+def _request_structured_decision(messages, schema_name, response_model):
+    """
+    Ask the model to commit to its final decision in a fixed JSON schema,
+    once the tool-calling conversation has run its course. Shared by
+    analyze_ticker and analyze_all_tickers — they only differ in which
+    Pydantic model (and schema name) they expect back.
+    """
+    decision = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=messages,
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": schema_name,
+                "schema": response_model.model_json_schema(),
+            },
+        },
+    )
+    return response_model.model_validate_json(decision.choices[0].message.content)
+
+
+def _enforce_direction_only_if_flagged(signal):
+    """The model doesn't always respect "direction only if flagged" —
+    enforce it in code rather than trusting the prompt alone."""
+    if not signal.flagged:
+        signal.direction = None
 
 
 def analyze_ticker(ticker: str) -> TradeSignal:
@@ -299,24 +339,8 @@ def analyze_ticker(ticker: str) -> TradeSignal:
         }
     )
 
-    decision = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=messages,
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": "TradeSignal",
-                "schema": TradeSignal.model_json_schema(),
-            },
-        },
-    )
-
-    signal = TradeSignal.model_validate_json(decision.choices[0].message.content)
-
-    # The model doesn't always respect "direction only if flagged" — enforce
-    # it in code rather than trusting the prompt alone.
-    if not signal.flagged:
-        signal.direction = None
+    signal = _request_structured_decision(messages, "TradeSignal", TradeSignal)
+    _enforce_direction_only_if_flagged(signal)
 
     return signal
 
@@ -349,24 +373,8 @@ def analyze_all_tickers(tickers: list[str] = TICKERS) -> list[TradeSignal]:
         }
     )
 
-    decision = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=messages,
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": "TradeSignalList",
-                "schema": TradeSignalList.model_json_schema(),
-            },
-        },
-    )
+    result = _request_structured_decision(messages, "TradeSignalList", TradeSignalList)
+    for signal in result.signals:
+        _enforce_direction_only_if_flagged(signal)
 
-    signals = TradeSignalList.model_validate_json(
-        decision.choices[0].message.content
-    ).signals
-
-    for signal in signals:
-        if not signal.flagged:
-            signal.direction = None
-
-    return signals
+    return result.signals

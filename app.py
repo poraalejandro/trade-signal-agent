@@ -17,6 +17,7 @@ from agent import (
     get_rsi_signal,
 )
 from backtest import backtest_all
+from confluence import CONFLUENCE_THRESHOLD, vote_from_signal
 from indicators import bollinger_bands, load_price_data, moving_average_crossover
 from market_data import TICKERS
 
@@ -47,6 +48,9 @@ st.caption(
 )
 
 
+# Not imported from market_data.DATA_DIR (Path("data")) on purpose: that
+# path is relative to src/'s working directory, while app.py runs from the
+# project root — the same relative path would resolve to the wrong place.
 DATA_DIR = Path(__file__).parent / "data"
 
 
@@ -167,16 +171,6 @@ def build_price_chart(ticker, overlay, colors):
     return chart, caption
 
 
-def vote_from_signal(signal_label):
-    """Map an indicator's Signal label to Bullish/Bearish/None, mirroring
-    the 3-of-4 confluence rule in agent.py's SYSTEM_INSTRUCTIONS."""
-    if signal_label in ("Oversold", "Bullish"):
-        return "Bullish"
-    if signal_label in ("Overbought", "Bearish"):
-        return "Bearish"
-    return "None"
-
-
 def render_vote_metric(column, label, value, vote, help_text=None):
     delta_color = {"Bullish": "green", "Bearish": "red", "None": "gray"}[vote]
     delta_arrow = {"Bullish": "up", "Bearish": "down", "None": "off"}[vote]
@@ -210,12 +204,19 @@ def render_indicator_breakdown(ticker):
     bullish_count = [rsi_vote, macd_vote, ema_vote, bollinger_vote].count("Bullish")
     bearish_count = [rsi_vote, macd_vote, ema_vote, bollinger_vote].count("Bearish")
 
-    if bullish_count >= 3:
-        st.success(f":material/check_circle: {bullish_count} of 4 bullish — meets the confluence threshold.")
-    elif bearish_count >= 3:
-        st.success(f":material/check_circle: {bearish_count} of 4 bearish — meets the confluence threshold.")
+    if bullish_count >= CONFLUENCE_THRESHOLD:
+        st.success(
+            f":material/check_circle: {bullish_count} of 4 bullish — meets the confluence threshold."
+        )
+    elif bearish_count >= CONFLUENCE_THRESHOLD:
+        st.success(
+            f":material/check_circle: {bearish_count} of 4 bearish — meets the confluence threshold."
+        )
     else:
-        st.caption(f"{bullish_count} bullish, {bearish_count} bearish — needs 3 of 4 to flag.")
+        st.caption(
+            f"{bullish_count} bullish, {bearish_count} bearish — "
+            f"needs {CONFLUENCE_THRESHOLD} of 4 to flag."
+        )
 
     col1, col2, col3, col4 = st.columns(4)
 

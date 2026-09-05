@@ -1,6 +1,7 @@
 """Backtest the confluence logic (no LLM) over historical data per ticker."""
 
 import pandas as pd
+from confluence import CONFLUENCE_THRESHOLD, RSI_OVERBOUGHT, RSI_OVERSOLD
 from indicators import (
     bollinger_bands,
     load_price_data,
@@ -31,8 +32,8 @@ def compute_confluence_signals(prices):
     rsi_values = rsi(prices)
     rsi_vote = pd.Series("None", index=prices.index)
 
-    rsi_bullish_mask = rsi_values < 35
-    rsi_bearish_mask = rsi_values > 65
+    rsi_bullish_mask = rsi_values < RSI_OVERSOLD
+    rsi_bearish_mask = rsi_values > RSI_OVERBOUGHT
 
     rsi_vote[rsi_bullish_mask] = "Bullish"
     rsi_vote[rsi_bearish_mask] = "Bearish"
@@ -40,7 +41,6 @@ def compute_confluence_signals(prices):
     macd_results = macd(prices)
     macd_vote = pd.Series("Bearish", index=prices.index)
     macd_vote[macd_results["MACD"] > macd_results["Signal Line"]] = "Bullish"
-    macd_vote[macd_results["MACD"] < macd_results["Signal Line"]] = "Bearish"
 
     # EMA Trend and Bollinger Signal already come out as
     # Bullish/Bearish/Mixed and Overbought/Oversold/Neutral respectively,
@@ -63,8 +63,8 @@ def compute_confluence_signals(prices):
     )
 
     confluence_signal = pd.Series("None", index=prices.index)
-    confluence_signal[bullish_votes >= 3] = "Call"
-    confluence_signal[bearish_votes >= 3] = "Put"
+    confluence_signal[bullish_votes >= CONFLUENCE_THRESHOLD] = "Call"
+    confluence_signal[bearish_votes >= CONFLUENCE_THRESHOLD] = "Put"
 
     return confluence_signal
 
@@ -84,8 +84,8 @@ def evaluate_signal(
         target_pct: minimum favorable move (e.g. 0.05 for 5%) to count as a win.
 
     Returns:
-        # TODO: decide the return shape — at least whether it won, and the
-        # actual best return achieved within the window. See conversation notes.
+        A dict with 'success' (bool), 'actual_return' (best move achieved,
+        as a fraction), and 'excess_pct' (actual_return - target_pct).
     """
 
     signal_position = prices.index.get_loc(signal_date)

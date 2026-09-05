@@ -1,6 +1,7 @@
 """Check SEC EDGAR for recent filings (earnings-related and annual) per ticker."""
 
 from datetime import date
+from functools import lru_cache
 
 import requests
 
@@ -23,6 +24,17 @@ EARNINGS_FORM_TYPES = ["8-K", "10-Q", "6-K"]
 ANNUAL_FORM_TYPES = ["10-K", "20-F"]
 
 
+@lru_cache(maxsize=1)
+def _fetch_ticker_cik_mapping():
+    """
+    Fetch SEC's official ticker -> CIK mapping. Cached for the life of the
+    process — this file doesn't change within a session, and it's large
+    enough that re-downloading it on every get_cik() call (e.g. once per
+    ticker in analyze_all_tickers) would be wasteful.
+    """
+    return requests.get(TICKER_CIK_URL, headers=HEADERS).json()
+
+
 def get_cik(ticker):
     """
     Look up a ticker's CIK (Central Index Key) via SEC's official mapping.
@@ -33,8 +45,7 @@ def get_cik(ticker):
     Returns:
         The zero-padded CIK string (10 digits), as EDGAR endpoints expect it.
     """
-    json_sec = requests.get(TICKER_CIK_URL, headers=HEADERS).json()
-    for entry in json_sec.values():
+    for entry in _fetch_ticker_cik_mapping().values():
         if entry["ticker"] == ticker.upper():
             return str(entry["cik_str"]).zfill(10)
 

@@ -1,9 +1,8 @@
 """Hand-rolled technical indicators. Each function takes a price (or volume) Series and returns a value/signal."""
 
 import pandas as pd
-from pathlib import Path
 
-DATA_DIR = Path("data")
+from market_data import DATA_DIR
 
 
 def load_price_data(ticker):
