@@ -295,12 +295,17 @@ def run_conversation_with_tools(messages: list[dict]) -> list[dict]:
     another's result), so they run concurrently via a thread pool rather
     than one at a time — each does file/network I/O, not CPU-bound work,
     so threads (not processes) are the right tool here.
+
+    reasoning_effort="none" disables this model's hidden chain-of-thought
+    tokens, which otherwise count as output and blow through Groq's free-tier
+    output-tokens-per-minute cap before the visible reply is even generated.
     """
     while True:
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
             tools=TOOLS,
+            reasoning_effort="none",
         )
         message = response.choices[0].message
         messages.append(message.model_dump(exclude_none=True))
@@ -330,6 +335,7 @@ def _request_structured_decision(messages, schema_name, response_model):
                 "schema": response_model.model_json_schema(),
             },
         },
+        reasoning_effort="none",
     )
     return response_model.model_validate_json(decision.choices[0].message.content)
 
