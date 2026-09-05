@@ -6,8 +6,11 @@ from pathlib import Path
 # Tickers in scope for v1 (see CLAUDE.md)
 TICKERS = ["NVDA", "META", "MSFT", "TSM", "IREN", "NBIS"]
 
-# Where each ticker's CSV will be written (data/<TICKER>.csv)
-DATA_DIR = Path("data")
+# Where each ticker's CSV will be written (data/<TICKER>.csv). Anchored to
+# this file's own location (project_root/src/market_data.py -> project_root
+# /data), not the process's working directory, so it resolves the same way
+# regardless of where the script is run from.
+DATA_DIR = Path(__file__).parent.parent / "data"
 
 # How far back to pull daily history. Needs to be long enough for backtest.py
 # to have a meaningful sample, without mixing too many different market regimes.

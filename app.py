@@ -9,6 +9,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+import market_data
 from agent import (
     analyze_ticker,
     get_bollinger_bands,
@@ -19,7 +20,7 @@ from agent import (
 from backtest import backtest_all
 from confluence import CONFLUENCE_THRESHOLD, vote_from_signal
 from indicators import bollinger_bands, load_price_data, moving_average_crossover
-from market_data import TICKERS
+from market_data import DATA_DIR, TICKERS
 
 CHART_LOOKBACK_DAYS = 180
 CHART_OVERLAYS = ["None", "Bollinger Bands", "EMA Trend (25/50/200)"]
@@ -48,17 +49,32 @@ st.caption(
 )
 
 
-# Not imported from market_data.DATA_DIR (Path("data")) on purpose: that
-# path is relative to src/'s working directory, while app.py runs from the
-# project root — the same relative path would resolve to the wrong place.
-DATA_DIR = Path(__file__).parent / "data"
-
-
 def data_file_mtime(ticker: str) -> float:
     """Last-modified time of a ticker's CSV, used to invalidate caches when
     market_data.py refreshes the data — Streamlit's cache has no way to
     know the file on disk changed unless it's part of the cached args."""
     return (DATA_DIR / f"{ticker}.csv").stat().st_mtime
+
+
+def ensure_data_downloaded():
+    """
+    data/ is gitignored (derived data, not source), so a fresh environment
+    — e.g. a new Streamlit Community Cloud deploy — starts with none of the
+    price history on disk. Download whatever's missing once, up front,
+    instead of letting the first load_price_data() call crash.
+    """
+    missing = [t for t in TICKERS if not (DATA_DIR / f"{t}.csv").exists()]
+    if not missing:
+        return
+
+    with st.spinner(f"First-time setup: downloading price data for {len(missing)} ticker(s)..."):
+        for ticker in missing:
+            data = market_data.fetch_ticker_data(ticker)
+            if data is not None:
+                market_data.save_ticker_data(data, ticker)
+
+
+ensure_data_downloaded()
 
 
 @st.cache_data

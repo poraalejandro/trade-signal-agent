@@ -21,10 +21,30 @@ from indicators import (
 )
 from market_data import TICKERS
 
-load_dotenv()
-api_key = os.getenv("GROQ_API_KEY")
+def _get_groq_api_key():
+    """
+    Read GROQ_API_KEY from Streamlit secrets when deployed on Streamlit
+    Community Cloud (no .env file exists there), falling back to .env /
+    the environment for local use and for the plain-Python usage shown in
+    the README (analyze_ticker etc. work without Streamlit at all).
+    """
+    try:
+        import streamlit as st
+
+        if "GROQ_API_KEY" in st.secrets:
+            return st.secrets["GROQ_API_KEY"]
+    except Exception:
+        pass
+
+    load_dotenv()
+    return os.getenv("GROQ_API_KEY")
+
+
+api_key = _get_groq_api_key()
 if not api_key:
-    raise EnvironmentError("GROQ_API_KEY not set in .env file")
+    raise EnvironmentError(
+        "GROQ_API_KEY not set (checked Streamlit secrets and .env)"
+    )
 
 client = Groq(api_key=api_key, max_retries=6)
 

@@ -51,6 +51,21 @@ To run the Streamlit app (from the project root, not `src/`):
 streamlit run app.py
 ```
 
+## Deploying (Streamlit Community Cloud)
+
+1. Push this repo to GitHub (already the case here).
+2. On [share.streamlit.io](https://share.streamlit.io), create a new app pointing at this repo, branch `main`, main file `app.py`.
+3. In the app's **Settings → Secrets**, add:
+
+   ```toml
+   GROQ_API_KEY = "your-key-here"
+   ```
+
+   (`agent.py` reads `GROQ_API_KEY` from Streamlit secrets when deployed, falling back to `.env` for local use.)
+4. `data/` is gitignored (derived data, not source), so a fresh deploy starts with no price history — `app.py` detects this on first load and downloads it automatically (a one-time delay on cold start, shown with a spinner).
+
+Since the app's expensive calls are cached with `@st.cache_data` shared across all visitors, and the ticker universe is a fixed list of 6, the worst case between data refreshes is 6 real Groq calls total, no matter how many people click around.
+
 ## Limitations / backtest findings
 
 **What was measured:** the confluence rule's 3-of-4 signals (`backtest.py`), evaluated over price history per ticker (~5 years for NVDA/META/MSFT/TSM, 4.8 for IREN, 1.9 for NBIS since its listing is more recent) — 111 signals total across the 6 tickers. A signal "wins" if price touches a 5% move in the signaled direction within the following 7 trading days.
