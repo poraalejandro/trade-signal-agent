@@ -1,5 +1,7 @@
 # trade-signal-agent
 
+**Live app:** [trade-signal-agent.streamlit.app](https://trade-signal-agent.streamlit.app/)
+
 An agent that flags potential call/put trade setups by combining technical indicator confluence with a fundamental SEC filings check, then backtests that logic against historical data before trusting it.
 
 **It never outputs a direct "execute this trade" instruction.** It only surfaces flagged candidates with reasoning attached, for a human to review. Silence — no candidates flagged — is a valid, expected outcome, not a failure state.

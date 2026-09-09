@@ -312,26 +312,37 @@ with analyze_all_col:
 if analyze_one and selected_ticker:
     with st.spinner(f"Analyzing {selected_ticker}..."):
         try:
-            signal = cached_analyze_ticker(selected_ticker, data_file_mtime(selected_ticker))
+            st.session_state.single_signal = cached_analyze_ticker(
+                selected_ticker, data_file_mtime(selected_ticker)
+            )
         except groq.RateLimitError:
             render_rate_limit_notice()
-        else:
-            render_signal(signal)
 
 if analyze_all:
+    results = []
     with st.status("Analyzing all tickers...", expanded=True) as status:
         for ticker in TICKERS:
             st.write(f"Analyzing {ticker}...")
             try:
-                signal = cached_analyze_ticker(ticker, data_file_mtime(ticker))
+                results.append(cached_analyze_ticker(ticker, data_file_mtime(ticker)))
             except groq.RateLimitError:
                 st.warning(
                     f"{ticker}: Groq's free-tier rate limit hit — skipping. "
                     "Wait under a minute and analyze it individually."
                 )
-                continue
-            render_signal(signal)
         status.update(label="Done", state="complete")
+    st.session_state.all_signals = results
+
+# Rendered from session_state (not gated by the buttons above) so results
+# stay on screen across reruns triggered by unrelated widgets, e.g. switching
+# the chart's ticker — a plain `if analyze_one:` only holds True on the exact
+# rerun the button was clicked on.
+if "single_signal" in st.session_state:
+    render_signal(st.session_state.single_signal)
+
+if "all_signals" in st.session_state:
+    for signal in st.session_state.all_signals:
+        render_signal(signal)
 
 st.divider()
 
