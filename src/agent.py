@@ -299,6 +299,10 @@ def run_conversation_with_tools(messages: list[dict]) -> list[dict]:
     reasoning_effort="none" disables this model's hidden chain-of-thought
     tokens, which otherwise count as output and blow through Groq's free-tier
     output-tokens-per-minute cap before the visible reply is even generated.
+    max_completion_tokens is set explicitly too: left unset, Groq estimates
+    the request's output size against the OTPM cap using its own default
+    (observed as high as 1146, against a cap of 1000) rather than what a tool
+    call actually needs, so an un-capped request can be rejected outright.
     """
     while True:
         response = client.chat.completions.create(
@@ -306,6 +310,7 @@ def run_conversation_with_tools(messages: list[dict]) -> list[dict]:
             messages=messages,
             tools=TOOLS,
             reasoning_effort="none",
+            max_completion_tokens=300,
         )
         message = response.choices[0].message
         messages.append(message.model_dump(exclude_none=True))
@@ -336,6 +341,7 @@ def _request_structured_decision(messages, schema_name, response_model):
             },
         },
         reasoning_effort="none",
+        max_completion_tokens=600,
     )
     return response_model.model_validate_json(decision.choices[0].message.content)
 
